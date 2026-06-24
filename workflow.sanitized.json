@@ -1,0 +1,132 @@
+{
+  "name": "Recruiter Inbox Triage",
+  "nodes": [
+    {
+      "parameters": { "pollTimes": { "item": [ { "mode": "everyMinute" } ] }, "simple": false, "filters": {} },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "credentials": { "gmailOAuth2": { "id": "<GMAIL_CREDENTIAL_ID>", "name": "Gmail account" } }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const has=(a,s)=>a.some(w=>s.indexOf(w)!==-1);\n// Known ATS platforms -> likely a real recruiter. Add your own.\nconst ALLOW=['greenhouse.io','comeet','sparkhire','lever.co','myworkday','ashbyhq','workable','careers.examplecorp'];\n// LinkedIn direct messages (a human) -> keep as LOG\nconst LIDM=['sent you a message','sent you a new message','sent you an inmail'];\n// LinkedIn automated job-alert digests -> IGNORE (sender + phrases)\nconst LIDIGEST=['jobalerts-noreply','jobs-noreply@linkedin','jobs-listings@linkedin'];\nconst LIJOB=['jobs similar to','view jobs in',' is hiring','you appeared in','competing against these','new jobs in','match your preferences','job alert for'];\n// Recruiter/job keywords, English + Hebrew\nconst JOB=['recruit','talent acquisition','position','the role','opportunity','architect','engineer','interview','משרה','משרת','משרות','מגייס','מגייסת','גיוס','דרוש','דרושה','קורות חיים','מועמד','תפקיד','הזדמנות','השמה','ראיון','להוביל','קבוצת'];\nconst NOISE=['unsubscribe','newsletter','webinar','medium daily digest','invites you to a new event','dependabot','renovate','noreply@github',' sale','% off','coupon','cashback'];\nconst out=[];\nfor(const item of $input.all()){\n  const j=item.json;\n  const id=String(j.id||j.messageId||'');\n  const from=String(j.From||j.from||'').toLowerCase();\n  const subject=String(j.Subject||j.subject||'');\n  const snippet=String(j.snippet||j.text||'');\n  const en=(from+' '+subject+' '+snippet).toLowerCase();\n  let bucket,reason,needsLLM=false;\n  if(has(ALLOW,from)){bucket='ALERT';reason='ATS/recruiter sender';needsLLM=true;}\n  else if(has(LIDM,en)){bucket='LOG';reason='LinkedIn DM';}\n  else if(has(LIDIGEST,from)||has(LIJOB,en)){bucket='IGNORE';reason='LinkedIn job-alert digest';}\n  else if(has(JOB,en)){bucket='LOG';reason='recruiter/job signal';needsLLM=true;}\n  else if(has(NOISE,en)){bucket='IGNORE';reason='noise';}\n  else{bucket='IGNORE';reason='no job signal';}\n  const llmPrompt='Triage this inbox email into ONE word: ALERT, LOG, or IGNORE. Email may be Hebrew or English. ALERT=a human recruiter message, interview invite, or rejection from a real application. LOG=job alert, application-viewed, or unsure. IGNORE=newsletter, marketing, or digest. When unsure answer LOG. From: '+from+' Subject: '+subject+' Snippet: '+snippet.slice(0,300);\n  out.push({json:{bucket,reason,needsLLM,id,from,subject,snippet:snippet.slice(0,300),llmPrompt}});\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "id": "triage-rules",
+      "name": "Triage rules"
+    },
+    {
+      "parameters": { "mode": "expression", "numberOutputs": 2, "output": "={{ $json.needsLLM ? 0 : 1 }}" },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [640, 300],
+      "id": "needs-llm",
+      "name": "Needs LLM?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/llm-route",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({tag:'classify',prompt:$json.llmPrompt,max_tokens:8,temperature:0}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [840, 200],
+      "id": "llm-classify",
+      "name": "LLM classify (local Ollama)"
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const r=$input.first().json;const orig=$('Triage rules').item.json;let ans=String(r.content||'').toUpperCase();let bucket=orig.bucket;if(ans.indexOf('ALERT')!==-1){bucket='ALERT';}else if(ans.indexOf('IGNORE')!==-1){bucket='IGNORE';}else if(ans.indexOf('LOG')!==-1){bucket='LOG';}return [{json:Object.assign({},orig,{bucket:bucket,refinedBy:'llm'})}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 200],
+      "id": "apply-llm",
+      "name": "Apply LLM"
+    },
+    {
+      "parameters": { "mode": "expression", "numberOutputs": 3, "output": "={{ ({ALERT:0,LOG:1,IGNORE:2})[$json.bucket] }}" },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1240, 300],
+      "id": "route-bucket",
+      "name": "Route by bucket"
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const T=$env.TELEGRAM_BOT_TOKEN;const CHAT=$env.TELEGRAM_CHAT_ID;const j=$json;const text='Recruiter ALERT: '+String(j.subject||'(no subject)')+' | From: '+String(j.from||'')+' | Why: '+String(j.reason||'');await this.helpers.httpRequest({url:'https://api.telegram.org/bot'+T+'/sendMessage',method:'POST',json:true,body:{chat_id:CHAT,text:text}});return [{json:{alerted:true}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, 140],
+      "id": "alert-telegram",
+      "name": "ALERT to Telegram"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["<LABEL_ALERT_ID>"]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1460, 260],
+      "id": "label-alert",
+      "name": "Label Alert",
+      "credentials": { "gmailOAuth2": { "id": "<GMAIL_CREDENTIAL_ID>", "name": "Gmail account" } }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const NOTION_TOKEN=$env.NOTION_TOKEN;const DS='<NOTION_DATA_SOURCE_ID>';const j=$json;const props={'Subject':{title:[{text:{content:String(j.subject||'(no subject)').slice(0,200)}}]},'From':{rich_text:[{text:{content:String(j.from||'').slice(0,200)}}]},'Bucket':{select:{name:j.bucket||'LOG'}},'Status':{select:{name:'New'}},'Why':{rich_text:[{text:{content:String(j.reason||'').slice(0,200)}}]}};await this.helpers.httpRequest({url:'https://api.notion.com/v1/pages',method:'POST',headers:{Authorization:'Bearer '+NOTION_TOKEN,'Notion-Version':'2025-09-03','Content-Type':'application/json'},json:true,body:{parent:{type:'data_source_id',data_source_id:DS},properties:props}});return [{json:{logged:true}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, 360],
+      "id": "log-notion",
+      "name": "LOG to Notion"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": ["<LABEL_LOG_ID>"]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1460, 480],
+      "id": "label-log",
+      "name": "Label Log",
+      "credentials": { "gmailOAuth2": { "id": "<GMAIL_CREDENTIAL_ID>", "name": "Gmail account" } }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1460, 600],
+      "id": "ignore-drop",
+      "name": "IGNORE drop"
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": { "main": [ [ { "node": "Triage rules", "type": "main", "index": 0 } ] ] },
+    "Triage rules": { "main": [ [ { "node": "Needs LLM?", "type": "main", "index": 0 } ] ] },
+    "Needs LLM?": { "main": [ [ { "node": "LLM classify (local Ollama)", "type": "main", "index": 0 } ], [ { "node": "Route by bucket", "type": "main", "index": 0 } ] ] },
+    "LLM classify (local Ollama)": { "main": [ [ { "node": "Apply LLM", "type": "main", "index": 0 } ] ] },
+    "Apply LLM": { "main": [ [ { "node": "Route by bucket", "type": "main", "index": 0 } ] ] },
+    "Route by bucket": { "main": [ [ { "node": "ALERT to Telegram", "type": "main", "index": 0 }, { "node": "Label Alert", "type": "main", "index": 0 } ], [ { "node": "LOG to Notion", "type": "main", "index": 0 }, { "node": "Label Log", "type": "main", "index": 0 } ], [ { "node": "IGNORE drop", "type": "main", "index": 0 } ] ] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
