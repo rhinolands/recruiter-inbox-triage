@@ -20,13 +20,13 @@ buried. Manual sweeping doesn't scale. This pipeline does the sweeping.
 
 ```mermaid
 flowchart TD
-    A["Gmail inbox<br/><small>poll every 60s</small>"] --> B["Triage rules — deterministic<br/><small>allowlist · Hebrew+English · LinkedIn digest · noise</small>"]
-    B -->|clear call| R{"Route to bucket"}
-    B -->|ambiguous| L["Local LLM · llama3.2:3b<br/><small>on-host · data never leaves</small>"]
+    A["Gmail inbox<br/>poll 60s"] --> B["Triage rules<br/>allowlist, keywords, noise"]
+    B -->|clear| R{"Route to bucket"}
+    B -->|ambiguous| L["Local LLM<br/>llama3.2:3b, on-host"]
     L --> R
-    R -->|ALERT| AL["Telegram ping<br/><small>+ email label</small>"]
-    R -->|LOG| LO["Notion row + label<br/><small>+ daily digest</small>"]
-    R -->|IGNORE| IG["dropped<br/><small>no action</small>"]
+    R -->|ALERT| AL["Telegram ping<br/>+ email label"]
+    R -->|LOG| LO["Notion + label<br/>+ daily digest"]
+    R -->|IGNORE| IG["Dropped"]
 
     classDef alert fill:#fb4c2f,stroke:#822111,color:#fff;
     classDef log fill:#fad165,stroke:#684e07,color:#000;
@@ -35,6 +35,9 @@ flowchart TD
     class LO log;
     class IG ignore;
 ```
+
+> Classification is two-stage: cheap deterministic rules first (they resolve most mail and
+> protect ALERT recall), then a **local** LLM only for the ambiguous middle. Detail below.
 
 ## How classification works
 
