@@ -6,7 +6,8 @@ it into three buckets — so the few real signals (a human recruiter, an intervi
 invite, a rejection that matters) surface instantly, and the noise stays silent.
 
 Built on self-hosted [n8n](https://n8n.io) + a local LLM (Ollama `llama3.2:3b`).
-**No email content ever leaves the host** — classification runs on-box.
+Classification runs on the host. Email bodies never go to a cloud LLM.
+The subject and sender of ALERT and LOG mail do leave the host. They go to Telegram and Notion.
 
 ---
 
@@ -51,10 +52,12 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
    - **LinkedIn job-alert digests** (e.g. "24 new jobs match your preferences") → IGNORE.
    - **Noise patterns** (newsletters, marketing, bot mail, unsubscribe footers) → IGNORE.
 
-   This kills roughly **~78% of the inbox** as noise without ever invoking the LLM.
+   Mail that these rules settle never reaches the LLM.
 
-2. **Local LLM** — only the ambiguous middle. A 3B model on the host arbitrates
-   `LOG` vs `IGNORE` vs `ALERT`. Free, private, fast enough.
+2. **Local LLM.** Mail from an ATS sender or with a job keyword goes to a 3B model.
+   The model can raise a bucket, for example LOG to ALERT. It can never lower one.
+   The workflow calls a local n8n webhook router (`/webhook/llm-route`) that fronts Ollama.
+   That router is not in this repo.
 
 ### Three buckets
 
@@ -64,16 +67,18 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
 | **LOG** | a real job signal worth keeping (incl. ambiguous — default here, never silently dropped) | database row + email label + one **daily digest** |
 | **IGNORE** | job-alert digests · newsletters · marketing · bot mail | dropped |
 
-> The recall-critical path (don't miss an interview) is guarded by the **sender
-> allowlist** — rules, not the model. So classification quality can't cause a missed
-> interview; worst case is a job-alert mislabeled.
+> The model can only raise a bucket. A model mistake cannot drop mail the rules kept.
+> Mail with no ATS sender and no job keyword is still dropped by the rules.
+> `tests/` checks this guard.
 
 ## Privacy-first
 
 - Classification runs **locally** (Ollama). Recruiter names and email bodies are
   **never** sent to a cloud LLM.
-- Secrets are injected via environment variables (`TELEGRAM_BOT_TOKEN`,
-  `NOTION_TOKEN`, a chat id, a data-source id) — never stored in the workflow.
+- Subject and sender of ALERT mail go to Telegram. Subject and sender of LOG mail go to Notion.
+- Secrets come from environment variables (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+  `NOTION_TOKEN`). They are never stored in the workflow.
+- The Notion data-source id is a placeholder in the LOG node. Set it after import.
 - The published workflow has all ids/tokens scrubbed to placeholders.
 
 ## Notification model
@@ -92,13 +97,16 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
 | Gmail API | capture + labels |
 | Telegram Bot | instant alerts |
 | Notion | the review queue |
-| Scheduled job | daily digest of the LOG queue |
+| Scheduled job | daily digest of the LOG queue (not in this repo) |
 
 ## Files
 
 - [`workflow.sanitized.json`](workflow.sanitized.json) — the n8n workflow, with all
   ids/credentials/tokens replaced by `<PLACEHOLDERS>`. Import into n8n, wire your own
   credentials + env, and set the placeholders.
+- [`tests/`](tests/) checks the workflow shape, the placeholders and the triage code.
+  Run `node --test tests/*.test.mjs` (Node 20 or later).
+- The daily digest is not part of this file.
 
 ## Design notes
 

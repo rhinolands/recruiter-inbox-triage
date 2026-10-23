@@ -47,7 +47,7 @@
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const r=$input.first().json;const orig=$('Triage rules').item.json;let ans=String(r.content||'').toUpperCase();let bucket=orig.bucket;if(ans.indexOf('ALERT')!==-1){bucket='ALERT';}else if(ans.indexOf('IGNORE')!==-1){bucket='IGNORE';}else if(ans.indexOf('LOG')!==-1){bucket='LOG';}return [{json:Object.assign({},orig,{bucket:bucket,refinedBy:'llm'})}];"
+        "jsCode": "const r=$input.first().json;const orig=$('Triage rules').item.json;/* The model may raise a bucket, never lower it. The rules keep recall. */const RANK={IGNORE:0,LOG:1,ALERT:2};const ans=String(r.content||'').toUpperCase();let llm=null;if(ans.indexOf('ALERT')!==-1){llm='ALERT';}else if(ans.indexOf('LOG')!==-1){llm='LOG';}else if(ans.indexOf('IGNORE')!==-1){llm='IGNORE';}let bucket=orig.bucket;if(llm&&RANK[llm]>RANK[bucket]){bucket=llm;}return [{json:Object.assign({},orig,{bucket:bucket,llmAnswer:llm,refinedBy:bucket!==orig.bucket?'llm':'rules'})}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
