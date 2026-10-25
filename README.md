@@ -1,9 +1,9 @@
 # Recruiter Inbox Triage
 
 Event-driven inbox triage for a job search. It captures recruiter and job emails
-(including LinkedIn-via-email), classifies each one with a **local** LLM, and routes
-it into three buckets — so the few real signals (a human recruiter, an interview
-invite, a rejection that matters) surface instantly, and the noise stays silent.
+(including LinkedIn-via-email), classifies them with rules and, where needed, a **local** LLM.
+It routes each one into three buckets. The few real signals (a human recruiter, an interview
+invite, a rejection that matters) surface within a minute, and the noise stays silent.
 
 Built on self-hosted [n8n](https://n8n.io) + a local LLM (Ollama `llama3.2:3b`).
 Classification runs on the host. Email bodies never go to a cloud LLM.
@@ -45,10 +45,10 @@ flowchart TD
 Two stages, **recall-first** (it is worse to miss a real interview than to over-keep):
 
 1. **Deterministic rules** (cheap, first pass)
-   - **Sender allowlist** — known ATS platforms (Greenhouse, Lever, Ashby, Workable,
+   - **Sender allowlist.** Known ATS platforms (Greenhouse, Lever, Ashby, Workable,
      Comeet, SparkHire, Workday…) → likely a real recruiter → ALERT candidate.
-   - **Recruiter keywords** — Hebrew *and* English (job/role/position, recruiting,
-     CV, candidate, opportunity, interview…) → keep.
+   - **Recruiter keywords.** English (recruit, position, the role, opportunity,
+     interview…) and Hebrew (job, role, CV, candidate, interview…) → keep.
    - **LinkedIn job-alert digests** (e.g. "24 new jobs match your preferences") → IGNORE.
    - **Noise patterns** (newsletters, marketing, bot mail, unsubscribe footers) → IGNORE.
 
@@ -64,7 +64,7 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
 | Bucket | What | Action |
 |---|---|---|
 | **ALERT** | human recruiter reply · interview invite · rejection from a real application | instant push notification + email label |
-| **LOG** | a real job signal worth keeping (incl. ambiguous — default here, never silently dropped) | database row + email label + one **daily digest** |
+| **LOG** | a real job signal worth keeping (incl. ambiguous, the default here, never silently dropped) | database row + email label + one **daily digest** |
 | **IGNORE** | job-alert digests · newsletters · marketing · bot mail | dropped |
 
 > The model can only raise a bucket. A model mistake cannot drop mail the rules kept.
@@ -101,7 +101,7 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
 
 ## Files
 
-- [`workflow.sanitized.json`](workflow.sanitized.json) — the n8n workflow, with all
+- [`workflow.sanitized.json`](workflow.sanitized.json) is the n8n workflow, with all
   ids/credentials/tokens replaced by `<PLACEHOLDERS>`. Import into n8n, wire your own
   credentials + env, and set the placeholders.
 - [`tests/`](tests/) checks the workflow shape, the placeholders and the triage code.
@@ -110,7 +110,7 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
 
 ## Design notes
 
-- **Reuse-first.** This is a new *workflow*, not a new service — it composes
+- **Reuse-first.** This is a new *workflow*, not a new service. It composes
   infrastructure that already exists (a local LLM router, a Telegram bot, a Notion
   workspace). A new trigger is not a new pipeline.
 - **3 buckets, not 2.** A binary keep/drop forces every ambiguous mail into a guess.
@@ -119,4 +119,4 @@ Two stages, **recall-first** (it is worse to miss a real interview than to over-
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
